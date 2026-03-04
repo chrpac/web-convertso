@@ -16,6 +16,12 @@ COLUMN_WIDTHS = {
 	'G': 30,
 	'H': 18,
 	'I': 30,
+    'AD': 18,
+    'AE': 30,
+    'AF': 10,
+    'AG':18,
+    'AH':10,
+    'AI':18,
     'BA': 25,
     'BC': 20
 }
@@ -151,6 +157,7 @@ OUTPUT_COLUMNS = [
 # SAP report column indices
 SAP_COL_SALES_ORDER_NO       = 0
 SAP_COL_MATERIAL_NO          = 2
+SAP_COL_DIST_CHANNEL_NAME    = 6
 SAP_COL_PAYMENT_TERM_CODE    = 7
 SAP_COL_SOLD_TO_NO           = 9
 SAP_COL_SHIP_TO_NO           = 11
@@ -252,6 +259,67 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     location_df = pd.read_sql("SELECT plant, location_id, location_name FROM location_master", con=engine)
     plant_to_location_id = dict(zip(location_df['plant'].astype(str), location_df['location_id']))
     plant_to_location_name = dict(zip(location_df['plant'].astype(str), location_df['location_name']))
+
+    try:
+        sales_dist_df = pd.read_sql(
+            "SELECT internal_id, distribution_channel, sale_channel_id, sale_channel FROM sales_dist_master",
+            con=engine,
+        )
+        sales_dist_df['distribution_channel'] = sales_dist_df['distribution_channel'].astype(str).str.strip()
+        sales_dist_unique = sales_dist_df.drop_duplicates(subset=['distribution_channel'], keep='first')
+        dc_to_sc_id = dict(zip(sales_dist_unique['distribution_channel'], sales_dist_unique['sale_channel_id']))
+        dc_to_sc_name = dict(zip(sales_dist_unique['distribution_channel'], sales_dist_unique['sale_channel']))
+        dc_to_internal_id = dict(zip(sales_dist_unique['distribution_channel'], sales_dist_unique['internal_id']))
+    except Exception:
+        dc_to_sc_id = {}
+        dc_to_sc_name = {}
+        dc_to_internal_id = {}
+
+    # Dynamic discount mappings from discount_master (detected during /api/validate)
+    try:
+        discount_master_df = pd.read_sql(
+            "SELECT sap_discount, internal_id, discount_name, discount_type, column_index FROM discount_master",
+            con=engine,
+        )
+    except Exception as e:
+        raise ValueError("Cannot load discount_master. Please run header validation before generate.") from e
+
+    discount_master_df = discount_master_df.copy()
+    discount_master_df['sap_discount'] = discount_master_df['sap_discount'].astype(str).str.strip().str.upper()
+    discount_master_df['internal_id'] = discount_master_df['internal_id'].fillna('').astype(str).str.strip()
+    discount_master_df['discount_name'] = discount_master_df['discount_name'].fillna('').astype(str).str.strip()
+    discount_master_df['discount_type'] = discount_master_df['discount_type'].astype(str).str.strip().str.lower()
+    discount_master_df['column_index'] = pd.to_numeric(discount_master_df['column_index'], errors='coerce')
+    discount_master_df = discount_master_df.dropna(subset=['sap_discount', 'discount_type', 'column_index'])
+    discount_master_df = discount_master_df[discount_master_df['sap_discount'] != '']
+    discount_master_df['column_index'] = discount_master_df['column_index'].astype(int)
+    discount_master_df = discount_master_df.sort_values(by='column_index')
+
+    item_discounts = discount_master_df[discount_master_df['discount_type'] == 'by item'][
+        ['sap_discount', 'column_index']
+    ].to_dict('records')
+    order_discounts = discount_master_df[discount_master_df['discount_type'] == 'by order'][
+        ['sap_discount', 'column_index', 'internal_id', 'discount_name']
+    ].to_dict('records')
+
+    if len(item_discounts) > 6:
+        raise ValueError(
+            f"Found {len(item_discounts)} item discounts in discount_master, but output supports only 6."
+        )
+    if len(order_discounts) > 3:
+        raise ValueError(
+            f"Found {len(order_discounts)} order discounts in discount_master, but output supports only 3."
+        )
+
+    sap_col_count = sap_df.shape[1]
+
+    def _require_sap_col(idx: int, label: str) -> int:
+        if idx < 0 or idx >= sap_col_count:
+            raise ValueError(
+                f"SAP column index out of range for {label}: {idx}. "
+                f"Available SAP columns: 0-{sap_col_count - 1}"
+            )
+        return idx
 
     # ===== 3. Build output DataFrame =====
     output_df = pd.DataFrame(columns=OUTPUT_COLUMNS)
@@ -369,6 +437,24 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     output_df['Internal ID of Sales Ref.'] = sr_ids
     output_df['Sales Ref.'] = sr_names
 
+    # (AF)(AG)(AH)(AI) Sales Channel / Distribution Channel
+    dist_channel_names = sap_df.iloc[:, SAP_COL_DIST_CHANNEL_NAME].values
+    af_ids, ag_names, ah_ids, ai_names = [], [], [], []
+    for dcn in dist_channel_names:
+        if pd.isna(dcn) or str(dcn).strip() == '':
+            af_ids.append(None); ag_names.append(None)
+            ah_ids.append(None); ai_names.append(None)
+        else:
+            s = str(dcn).strip()
+            af_ids.append(dc_to_sc_id.get(s))
+            ag_names.append(dc_to_sc_name.get(s))
+            ah_ids.append(dc_to_internal_id.get(s))
+            ai_names.append(s if dc_to_internal_id.get(s) is not None else None)
+    output_df['Internal ID of Sales Channel'] = af_ids
+    output_df['Sales Channel'] = ag_names
+    output_df['Internal ID of Distribution Channel'] = ah_ids
+    output_df['Distribution Channel'] = ai_names
+
     # (AJ)-(AM) Country / Continent constants
     output_df['Internal ID of Customer Country'] = 324
     output_df['Customer Country'] = 'Thailand'
@@ -411,10 +497,30 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     # (BI) SPS STD Sales Total
     output_df['SPS STD Sales Total'] = output_df['Quantity'] * output_df['SPS STD Sales Unit Price']
 
-    # (BJ) Unit Price after Item Discount
-    aq = sap_df.iloc[:, SAP_COL_ZP01_AMOUNT].apply(parse_sap_number).fillna(0)
-    ay = sap_df.iloc[:, SAP_COL_ZC01_AMOUNT].apply(parse_sap_number).fillna(0)
-    output_df['Unit Price after Item Discount (Exc.VAT)'] = output_df['SPS STD Sales Unit Price'] + (aq + ay)
+    # (BJ), (CA-CQ) Dynamic by-item discount mapping from discount_master
+    item_discount_amount_sum = pd.Series(0.0, index=sap_df.index)
+    for i, discount in enumerate(item_discounts, start=1):
+        sap_code = discount['sap_discount']
+        base_idx = _require_sap_col(int(discount['column_index']), f"{sap_code} base")
+        amount_idx = _require_sap_col(base_idx + 2, f"{sap_code} amount")
+        value_idx = _require_sap_col(base_idx + 6, f"{sap_code} value")
+
+        sap_code_col = sap_df.iloc[:, base_idx].astype(str).str.strip().str.upper()
+        has_discount = sap_code_col.str.contains(sap_code, na=False)
+
+        code_col = f'Code of Discount/Markup {i}'
+        net_col = f'SPS Net Discount/Markup {i}'
+
+        output_df.loc[has_discount, code_col] = sap_code
+        net_values = sap_df.iloc[:, value_idx].apply(parse_sap_number)
+        output_df.loc[has_discount, net_col] = net_values[has_discount]
+
+        amount_values = sap_df.iloc[:, amount_idx].apply(parse_sap_number).fillna(0)
+        item_discount_amount_sum = item_discount_amount_sum + amount_values.where(has_discount, 0)
+
+    output_df['Unit Price after Item Discount (Exc.VAT)'] = (
+        output_df['SPS STD Sales Unit Price'] + item_discount_amount_sum
+    )
 
     # (BK) Amount
     output_df['Amount'] = output_df['Unit Price after Item Discount (Exc.VAT)'] * output_df['Quantity']
@@ -424,18 +530,6 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     output_df['Tax Amt'] = output_df['Amount'] * 0.07
     output_df['Gross Amount'] = output_df['Amount'] + output_df['Tax Amt']
 
-    # (CA)(CB) ZP01 Discount
-    sap_zp01 = sap_df.iloc[:, SAP_COL_ZP01].astype(str).str.strip().str.upper()
-    has_zp01 = sap_zp01.str.contains('ZP01', na=False)
-    output_df.loc[has_zp01, 'Code of Discount/Markup 1'] = 'ZP01'
-    output_df.loc[has_zp01, 'SPS Net Discount/Markup 1'] = sap_df.iloc[:, SAP_COL_ZP01_VALUE].apply(parse_sap_number)[has_zp01]
-
-    # (CD)(CE) ZC01 Discount
-    sap_zc01 = sap_df.iloc[:, SAP_COL_ZC01].astype(str).str.strip().str.upper()
-    has_zc01 = sap_zc01.str.contains('ZC01', na=False)
-    output_df.loc[has_zc01, 'Code of Discount/Markup 2'] = 'ZC01'
-    output_df.loc[has_zc01, 'SPS Net Discount/Markup 2'] = sap_df.iloc[:, SAP_COL_ZC01_VALUE].apply(parse_sap_number)[has_zc01]
-
     # (BY) SPS Sales Discount Total
     discount_cols = [
         'SPS Net Discount/Markup 1', 'SPS Net Discount/Markup 2',
@@ -444,9 +538,17 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     ]
     output_df['SPS Sales Discount Total'] = output_df[discount_cols].fillna(0).sum(axis=1)
 
-    # (CT) Promotion Order Amount 1
-    sap_zd13_value = sap_df.iloc[:, SAP_COL_ZD13_VALUE].apply(parse_sap_number)
-    output_df['Promotion Order Amount 1'] = sap_zd13_value
+    # (CT-CZ) Dynamic by-order discount mapping from discount_master
+    for i, discount in enumerate(order_discounts, start=1):
+        sap_code = discount['sap_discount']
+        base_idx = _require_sap_col(int(discount['column_index']), f"{sap_code} base")
+        value_idx = _require_sap_col(base_idx + 6, f"{sap_code} value")
+
+        sap_code_col = sap_df.iloc[:, base_idx].astype(str).str.strip().str.upper()
+        has_discount = sap_code_col.str.contains(sap_code, na=False)
+        promo_col = f'Promotion Order Amount {i}'
+        promo_values = sap_df.iloc[:, value_idx].apply(parse_sap_number)
+        output_df.loc[has_discount, promo_col] = promo_values[has_discount]
 
     # (DA) Promotion Order Amount Total
     promo_cols = ['Promotion Order Amount 1', 'Promotion Order Amount 2', 'Promotion Order Amount 3']
@@ -463,7 +565,8 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     sum_cols = [
         'SPS Sales Discount Total', 'SPS Net Discount/Markup 1', 'SPS Net Discount/Markup 2',
         'SPS Net Discount/Markup 3', 'SPS Net Discount/Markup 4', 'SPS Net Discount/Markup 5',
-        'SPS Net Discount/Markup 6', 'Promotion Order Amount 1',
+        'SPS Net Discount/Markup 6', 'Promotion Order Amount 1', 'Promotion Order Amount 2',
+        'Promotion Order Amount 3', 'Promotion Order Amount Total',
     ]
 
     inserted_row_indices = []
@@ -507,14 +610,14 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
 
         # ===== 3.6 Insert promotion rows =====
         subtotal_set = set(inserted_row_indices)
-        subtotal_with_ct = [
+        subtotal_with_promo = [
             i for i in inserted_row_indices
-            if pd.notna(output_df.at[i, 'Promotion Order Amount 1'])
-            and output_df.at[i, 'Promotion Order Amount 1'] != 0
+            if output_df.loc[i, promo_cols].notna().any()
+            and (output_df.loc[i, promo_cols].fillna(0) != 0).any()
         ]
 
-        if subtotal_with_ct:
-            subtotal_with_ct_set = set(subtotal_with_ct)
+        if subtotal_with_promo:
+            subtotal_with_promo_set = set(subtotal_with_promo)
             new_rows2 = []
             row_types = []
 
@@ -522,18 +625,23 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
                 new_rows2.append(output_df.iloc[idx].to_dict())
                 row_types.append('subtotal' if idx in subtotal_set else 'normal')
 
-                if idx in subtotal_with_ct_set:
-                    promo_row = output_df.iloc[idx].to_dict()
-                    ct_val = promo_row.get('Promotion Order Amount 1') or 0
-                    promo_row['Internal ID of Item'] = 72795
-                    promo_row['Item'] = 'LDCD-IR-001'
-                    promo_row['SPS STD Sales Total'] = ct_val
-                    promo_row['Amount'] = ct_val
-                    promo_row['Tax Code 1'] = 'VAT_TH:VAT 7%'
-                    promo_row['Tax Amt'] = ct_val * 0.07
-                    promo_row['Gross Amount'] = ct_val + ct_val * 0.07
-                    new_rows2.append(promo_row)
-                    row_types.append('promotion')
+                if idx in subtotal_with_promo_set:
+                    for promo_idx, promo_col in enumerate(promo_cols):
+                        promo_val = output_df.at[idx, promo_col]
+                        if pd.isna(promo_val) or promo_val == 0:
+                            continue
+
+                        promo_row = output_df.iloc[idx].to_dict()
+                        order_discount = order_discounts[promo_idx] if promo_idx < len(order_discounts) else {}
+                        promo_row['Internal ID of Item'] = order_discount.get('internal_id', '')
+                        promo_row['Item'] = order_discount.get('discount_name', '')
+                        promo_row['SPS STD Sales Total'] = promo_val
+                        promo_row['Amount'] = promo_val
+                        promo_row['Tax Code 1'] = 'VAT_TH:VAT 7%'
+                        promo_row['Tax Amt'] = promo_val * 0.07
+                        promo_row['Gross Amount'] = promo_val + promo_val * 0.07
+                        new_rows2.append(promo_row)
+                        row_types.append('promotion')
 
             output_df = pd.DataFrame(new_rows2, columns=OUTPUT_COLUMNS).reset_index(drop=True)
             _recalc_running_no(output_df)

@@ -87,6 +87,22 @@ MASTER_CONFIGS = {
         "pk": "address_internal_id",
         "dedup": "address_internal_id",
     },
+    "sales_dist": {
+        "sheet": "Sale&Dist master",
+        "table": "sales_dist_master",
+        "columns": {
+            "Internal ID": "internal_id",
+            "Distribution Channel": "distribution_channel",
+            "Domestic/Export": "domestic_export",
+            'filter by "Subsidiary"': "subsidiary",
+            "Sale channel ID": "sale_channel_id",
+            'filter by "Sale Channel"': "sale_channel",
+            "Tax Branch": "tax_branch",
+            "Tax Code": "tax_code",
+        },
+        "pk": "internal_id",
+        "dedup": "internal_id",
+    },
 }
 
 
