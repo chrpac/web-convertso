@@ -1,0 +1,52 @@
+---
+description: Business logic and column mapping for the Excel generation service
+globs: services/generate_excel.py
+alwaysApply: false
+---
+
+# Generate Excel — Business Logic
+
+## Output Format
+- Sheet name: `Opening SO`
+- 109 columns (A–DE) defined in `OUTPUT_COLUMNS`
+- Each column has an Excel letter comment (e.g. `# A`, `# BH`)
+
+## SAP Report Column Index Mapping
+Key SAP columns referenced by index (0-based):
+- 0: Sales Order No, 2: Material No, 7: Payment Term Code
+- 9: Sold To No, 11: Ship To No, 13: Shipping Label
+- 15: Sales Employee Name, 16: PO Number, 17: Plant
+- 20: SO Date, 21: PO Date, 22: Request Delivery Date
+- 23: Order Quantity, 24: Sales Unit, 34: Amount (AI)
+- 40: ZP01 flag (AO), 42: ZP01 Amount (AQ), 46: ZP01 Value (AU)
+- 48: ZC01 flag (AW), 50: ZC01 Amount (AY), 54: ZC01 Value (BC)
+- 56: ZD13 flag (BE), 62: ZD13 Value (BK)
+
+## Lookup Logic (MySQL tables)
+| Output Column | SAP Source | Lookup |
+|---|---|---|
+| Customer (D/E) | sold_to_no | `customer_master.old_code` → internal_id |
+| Ship to Customer (F/G) | ship_to_no | `customer_master.old_code` → internal_id |
+| Shipping Label (H) | Shipping label col | Fuzzy match → `shipping_label_master.address_label` (≥80%) |
+| Payment Terms (N/O) | payment_term_code | `payment_term_master.payment_term_code` |
+| Sales Ref (AD/AE) | Sales employee name | Fuzzy match → `sales_rep_master.first_name_th+last_name_th` (≥80%) |
+| Item (AZ/BA) | Material No | `item_master.old_item_code` |
+| Location (BB/BC) | Plant | `location_master.plant` |
+
+## SAP Number Format
+Values like `"  0.560000000-"` use `parse_sap_number()` — handles trailing minus sign.
+
+## Calculated Columns
+- BH = SAP AI (Amount via parse_sap_number)
+- BI = BD × BH
+- BJ = BH + (SAP AQ + SAP AY)  ← ZP01 + ZC01 amounts
+- BK = BJ × BD
+- BL = 'VAT_TH:VAT 7%', BM = BK × 7%, BN = BK + BM
+- BY = sum(CB,CE,CH,CK,CN,CQ), DA = sum(CT,CW,CZ)
+
+## Inserted Rows
+1. **Subtotal rows** (green `#C6EFCE`): One per SO with promotions. Item=-2, Item='Subtotal'. Sums discount/promo columns across SO.
+2. **Promotion row 1** (pink `#FCE4EC`): Below subtotal if CT≠0. Item=72795, Item='LDCD-IR-001'. BI/BK=CT, tax calculated.
+
+## Hardcoded Constants
+Product=CZ, Domestic, Subsidiary=2/Double A (1991) PLC, Incoterms=5/DAP, Currency=THB, ExRate=1, Country=324/Thailand, Continent=2/Asia

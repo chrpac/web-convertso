@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAP SO → NetSuite Converter</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Inter',system-ui,sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px}
+    .card{background:#fff;border-radius:16px;box-shadow:0 1px 3px rgba(0,0,0,.08),0 4px 24px rgba(0,0,0,.04);max-width:640px;width:100%;padding:40px}
+    h1{font-size:1.5rem;font-weight:700;margin-bottom:4px}
+    .subtitle{color:#64748b;font-size:.875rem;margin-bottom:32px}
+    .section{margin-bottom:28px}
+    .section-title{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;margin-bottom:12px}
+    .drop-zone{border:2px dashed #cbd5e1;border-radius:12px;padding:40px;text-align:center;cursor:pointer;transition:all .2s}
+    .drop-zone:hover,.drop-zone.dragover{border-color:#3b82f6;background:#eff6ff}
+    .drop-zone.uploaded{border-color:#22c55e;background:#f0fdf4;cursor:default}
+    .drop-zone p{color:#64748b;font-size:.875rem}
+    .drop-zone .filename{color:#1e293b;font-weight:600;font-size:.9rem;margin-top:8px}
+    .drop-zone input{display:none}
+    .icon{font-size:2rem;margin-bottom:8px;display:block}
+    .row{display:flex;gap:12px;align-items:flex-end}
+    select,button{font-family:inherit;font-size:.875rem;border-radius:8px;padding:10px 16px;border:1px solid #e2e8f0;outline:none;transition:all .15s}
+    select{flex:1;background:#fff;color:#1e293b;cursor:pointer}
+    select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+    .btn{font-weight:600;cursor:pointer;border:none;display:inline-flex;align-items:center;gap:8px;justify-content:center}
+    .btn-secondary{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+    .btn-secondary:hover{background:#e2e8f0}
+    .btn-primary{background:#3b82f6;color:#fff}
+    .btn-primary:hover{background:#2563eb}
+    .btn-primary:disabled{background:#93c5fd;cursor:not-allowed}
+    .btn-success{background:#22c55e;color:#fff}
+    .btn-success:hover{background:#16a34a}
+    .btn-lg{padding:14px 28px;font-size:.95rem;border-radius:10px;width:100%}
+    .toast{position:fixed;top:24px;right:24px;padding:14px 20px;border-radius:10px;font-size:.875rem;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.12);transform:translateX(120%);transition:transform .3s ease;z-index:100;max-width:400px}
+    .toast.show{transform:translateX(0)}
+    .toast.success{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}
+    .toast.error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+    .toast.info{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe}
+    .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .hidden{display:none}
+    .divider{height:1px;background:#e2e8f0;margin:28px 0}
+    .stats{display:flex;gap:16px;margin-top:16px;flex-wrap:wrap}
+    .stat{background:#f8fafc;border-radius:8px;padding:12px 16px;flex:1;min-width:120px;text-align:center}
+    .stat .num{font-size:1.25rem;font-weight:700;color:#3b82f6}
+    .stat .label{font-size:.7rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>SAP SO → NetSuite</h1>
+    <p class="subtitle">Convert SAP Sales Orders to NetSuite Opening SO format</p>
+
+    <!-- Step 1: Upload -->
+    <div class="section">
+      <div class="section-title">Step 1 — Upload Excel File</div>
+      <div class="drop-zone" id="dropZone">
+        <span class="icon">📄</span>
+        <p>Drag & drop your <strong>.xlsx</strong> file here, or click to browse</p>
+        <input type="file" id="fileInput" accept=".xlsx,.xls">
+      </div>
+    </div>
+
+    <!-- Step 2: Import Master (optional) -->
+    <div class="section">
+      <div class="section-title">Step 2 — Import Master Data <span style="color:#94a3b8;font-weight:400;text-transform:none">(optional)</span></div>
+      <div class="row">
+        <select id="masterSelect" disabled>
+          <option value="">Select master data…</option>
+          {% for key, label in master_options.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-secondary" id="importBtn" disabled>Import</button>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Step 3: Generate -->
+    <div class="section">
+      <div class="section-title">Step 3 — Generate & Download</div>
+      <button class="btn btn-primary btn-lg" id="generateBtn" disabled>
+        Generate Excel File
+      </button>
+      <div id="resultArea" class="hidden">
+        <div class="stats">
+          <div class="stat"><div class="num" id="statRows">0</div><div class="label">Total Rows</div></div>
+          <div class="stat"><div class="num" id="statSubtotal">0</div><div class="label">Subtotal Rows</div></div>
+          <div class="stat"><div class="num" id="statPromo">0</div><div class="label">Promotion Rows</div></div>
+        </div>
+        <button class="btn btn-success btn-lg" id="downloadBtn" style="margin-top:16px">
+          ⬇ Download output_opening_so.xlsx
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const masterSelect = document.getElementById('masterSelect');
+    const importBtn = document.getElementById('importBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const resultArea = document.getElementById('resultArea');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const toast = document.getElementById('toast');
+
+    let uploadedFileId = null;
+    let uploadedExt = '.xlsx';
+    let outputId = null;
+
+    function showToast(msg, type = 'info', duration = 4000) {
+      toast.textContent = msg;
+      toast.className = 'toast ' + type + ' show';
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => toast.classList.remove('show'), duration);
+    }
+
+    // Upload
+    dropZone.addEventListener('click', () => { if (!uploadedFileId) fileInput.click(); });
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+    async function handleFile(file) {
+      if (!file.name.match(/\.xlsx?$/i)) { showToast('Please upload an .xlsx file', 'error'); return; }
+      const fd = new FormData();
+      fd.append('file', file);
+      dropZone.innerHTML = '<span class="icon">⏳</span><p>Uploading…</p>';
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: fd });
+        const data = await res.json();
+        uploadedFileId = data.file_id;
+        uploadedExt = data.ext;
+        dropZone.classList.add('uploaded');
+        dropZone.innerHTML = '<span class="icon">✅</span><p>File uploaded</p><div class="filename">' + data.filename + '</div>';
+        masterSelect.disabled = false;
+        importBtn.disabled = false;
+        generateBtn.disabled = false;
+        showToast('File uploaded successfully', 'success');
+      } catch (e) {
+        dropZone.innerHTML = '<span class="icon">📄</span><p>Drag & drop your <strong>.xlsx</strong> file here, or click to browse</p><input type="file" id="fileInput" accept=".xlsx,.xls">';
+        showToast('Upload failed: ' + e.message, 'error');
+      }
+    }
+
+    // Import Master
+    importBtn.addEventListener('click', async () => {
+      const master = masterSelect.value;
+      if (!master) { showToast('Please select a master data type', 'error'); return; }
+      importBtn.disabled = true;
+      importBtn.innerHTML = '<span class="spinner"></span> Importing…';
+      try {
+        const fd = new FormData();
+        fd.append('file_id', uploadedFileId);
+        fd.append('ext', uploadedExt);
+        fd.append('master_type', master);
+        const res = await fetch('/api/import-master', { method: 'POST', body: fd });
+        const data = await res.json();
+        showToast(data.message, data.status === 'success' ? 'success' : 'error', 5000);
+      } catch (e) {
+        showToast('Import failed: ' + e.message, 'error');
+      } finally {
+        importBtn.disabled = false;
+        importBtn.innerHTML = 'Import';
+      }
+    });
+
+    // Generate
+    generateBtn.addEventListener('click', async () => {
+      generateBtn.disabled = true;
+      generateBtn.innerHTML = '<span class="spinner"></span> Generating…';
+      resultArea.classList.add('hidden');
+      try {
+        const fd = new FormData();
+        fd.append('file_id', uploadedFileId);
+        fd.append('ext', uploadedExt);
+        const res = await fetch('/api/generate', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.status === 'success') {
+          outputId = data.output_id;
+          document.getElementById('statRows').textContent = data.rows;
+          document.getElementById('statSubtotal').textContent = data.subtotal_rows;
+          document.getElementById('statPromo').textContent = data.promotion_rows;
+          resultArea.classList.remove('hidden');
+          showToast(data.message, 'success');
+        } else {
+          showToast(data.message, 'error', 8000);
+        }
+      } catch (e) {
+        showToast('Generation failed: ' + e.message, 'error');
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = 'Generate Excel File';
+      }
+    });
+
+    // Download
+    downloadBtn.addEventListener('click', () => {
+      if (outputId) window.location.href = '/api/download/' + outputId;
+    });
+  </script>
+</body>
+</html>

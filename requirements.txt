@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-multipart
+jinja2
+pandas
+openpyxl
+sqlalchemy
+pymysql[rsa]
+cryptography
+rapidfuzz
+python-dotenv
+numpy

@@ -1,0 +1,31 @@
+---
+description: Coding conventions and patterns used in this project
+alwaysApply: true
+---
+
+# Coding Conventions
+
+## Python
+- Use `services/db.py` for all DB connections — never hardcode credentials
+- All config via `.env` (python-dotenv), accessed with `os.getenv()`
+- SAP column indices defined as `SAP_COL_*` constants at module level
+- Output column names must match `OUTPUT_COLUMNS` list exactly (109 columns, A–DE)
+- Use `parse_sap_number()` for any numeric SAP field (handles trailing minus, whitespace)
+- Comments on output_df assignments should include Excel column letter: `# (BH) description`
+
+## Frontend
+- Single-page app in `templates/index.html` — vanilla JS, no framework
+- API calls use `fetch()` with `FormData`
+- Toast notifications for user feedback
+- All styling inline in `<style>` block (no external CSS files)
+
+## Docker
+- Web and DB communicate via Docker internal network (service name `db`)
+- MySQL port is `expose` only (not bound to host)
+- `.env` file uses `DB_HOST=db` for Docker, change to `localhost` for local dev
+
+## Adding New Output Columns
+1. Add to `OUTPUT_COLUMNS` list with correct position and comment
+2. Add SAP column constant if reading from SAP report
+3. Add logic in the build section with `# (XX) Column Name:` comment
+4. If column participates in subtotal/promotion rows, update `sum_cols`, `copy_cols`, or row builders

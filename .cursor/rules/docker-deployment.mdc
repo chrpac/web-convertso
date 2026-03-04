@@ -1,0 +1,38 @@
+---
+description: Docker and deployment configuration
+globs: "{Dockerfile,docker-compose.yml,.env,.env.example}"
+alwaysApply: false
+---
+
+# Docker & Deployment
+
+## Local Development
+```bash
+pip install -r requirements.txt
+# Set .env DB_HOST=localhost
+python app.py
+```
+
+## Docker
+```bash
+# Set .env DB_HOST=db
+docker compose up --build
+```
+
+## Environment Variables
+| Variable | Docker Default | Description |
+|---|---|---|
+| `DB_USER` | root | MySQL user |
+| `DB_PASSWORD` | init1234 | MySQL password |
+| `DB_HOST` | db | `db` for Docker, `localhost` for local |
+| `DB_PORT` | 3306 | MySQL port |
+| `DB_NAME` | sap_so_to_netsuite | Database name |
+| `PORT` | 8000 | Web server port |
+
+## Nginx Reverse Proxy
+When behind Nginx, set `client_max_body_size 50M;` in server block to allow large Excel uploads.
+
+## Container Network
+- `web` service connects to `db` service via Docker internal network
+- MySQL port is NOT exposed to host (uses `expose: 3306` not `ports`)
+- Only the web service port is bound to host

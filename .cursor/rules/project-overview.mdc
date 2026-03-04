@@ -1,0 +1,43 @@
+---
+description: Project overview and architecture for SAP SO to NetSuite Converter web app
+alwaysApply: true
+---
+
+# SAP SO to NetSuite Converter — Project Overview
+
+## Purpose
+Convert SAP Sales Orders into NetSuite "Opening SO" Excel format for Double A (1991) PLC (Domestic, THB).
+
+## Tech Stack
+- **Backend**: FastAPI (Python)
+- **Frontend**: Single-page HTML with vanilla JS (no framework)
+- **Database**: MySQL 8.0 (`sap_so_to_netsuite`)
+- **Libraries**: pandas, openpyxl, sqlalchemy, pymysql, rapidfuzz
+- **Deployment**: Docker + docker-compose (behind Nginx reverse proxy)
+
+## Project Structure
+```
+web/
+├── app.py                    # FastAPI entry point + API routes
+├── services/
+│   ├── db.py                 # DB connection (reads from .env)
+│   ├── import_master.py      # Import 6 master data types from Excel to MySQL
+│   └── generate_excel.py     # Core logic: SAP report → NetSuite Opening SO Excel
+├── templates/
+│   └── index.html            # Single-page frontend
+├── temp/                     # Uploaded/generated temp files (auto-cleanup 1hr)
+├── .env                      # Environment config (DB_HOST, DB_USER, etc.)
+├── Dockerfile
+└── docker-compose.yml
+```
+
+## Workflow
+1. User uploads `.xlsx` file containing SAP report + master data sheets
+2. (Optional) User imports master data into MySQL via dropdown selection
+3. User clicks "Generate" → backend reads SAP report, looks up master data from MySQL, produces styled Excel output
+
+## API Endpoints
+- `POST /api/upload` — Upload Excel, returns `file_id`
+- `POST /api/import-master` — Import selected master data type
+- `POST /api/generate` — Generate Opening SO Excel, returns `output_id`
+- `GET /api/download/{output_id}` — Download generated file

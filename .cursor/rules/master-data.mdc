@@ -1,0 +1,27 @@
+---
+description: Master data import configuration and MySQL table schemas
+globs: services/import_master.py
+alwaysApply: false
+---
+
+# Master Data Import
+
+## Config-Driven Approach
+All 6 master types defined in `MASTER_CONFIGS` dict. Each has: `sheet`, `table`, `columns` mapping, `pk`, `dedup` field.
+
+## MySQL Tables
+
+| Table | Primary Key | Key Lookup Fields |
+|---|---|---|
+| `customer_master` | internal_id | old_code → internal_id, code, customer_name |
+| `item_master` | internal_id | old_item_code → internal_id, item_code |
+| `location_master` | location_id | plant → location_id, location_name |
+| `payment_term_master` | internal_id | payment_term_code → internal_id, name |
+| `sales_rep_master` | internal_id | first_name_th + last_name_th (fuzzy), employee_id, name |
+| `shipping_label_master` | address_internal_id | address_label (fuzzy), ship_to_code |
+
+## Import Behavior
+- Creates database if not exists
+- Truncates table before insert (if exists)
+- Sets primary key on first creation
+- Drops duplicates on dedup field before insert
