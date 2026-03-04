@@ -6,6 +6,21 @@ from openpyxl.styles import PatternFill
 from .db import get_engine
 
 
+COLUMN_WIDTHS = {
+    'A': 8,      # Internal Running No
+    'B': 20,     # Sales Order No
+    'C': 20,     # External ID
+	'D': 18,
+	'E': 30,
+	'F': 18,
+	'G': 30,
+	'H': 18,
+	'I': 30,
+    'BA': 25,
+    'BC': 20
+}
+
+
 def parse_sap_number(val):
     """Parse SAP number format e.g. '  0.560000000-' -> -0.56"""
     if pd.isna(val):
@@ -147,16 +162,17 @@ SAP_COL_SO_DATE              = 20
 SAP_COL_PO_DATE              = 21
 SAP_COL_REQUEST_DELIVERY_DATE = 22
 SAP_COL_ORDER_QUANTITY       = 23
-SAP_COL_SALES_UNIT           = 24
-SAP_COL_AMOUNT               = 34
-SAP_COL_ZP01                 = 40
-SAP_COL_ZP01_AMOUNT          = 42
-SAP_COL_ZP01_VALUE           = 46
-SAP_COL_ZC01                 = 48
-SAP_COL_ZC01_AMOUNT          = 50
-SAP_COL_ZC01_VALUE           = 54
-SAP_COL_ZD13                 = 56
-SAP_COL_ZD13_VALUE           = 62
+SAP_COL_PENDING_QUANTITY     = 24
+SAP_COL_SALES_UNIT           = 25
+SAP_COL_AMOUNT               = 35
+SAP_COL_ZP01                 = 41
+SAP_COL_ZP01_AMOUNT          = 43
+SAP_COL_ZP01_VALUE           = 47
+SAP_COL_ZC01                 = 49
+SAP_COL_ZC01_AMOUNT          = 51
+SAP_COL_ZC01_VALUE           = 55
+SAP_COL_ZD13                 = 57
+SAP_COL_ZD13_VALUE           = 63
 
 
 def _recalc_running_no(output_df):
@@ -386,7 +402,7 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     output_df['Location (Line)'] = loc_names
 
     # (BD)(BE) Quantity / Unit
-    output_df['Quantity'] = sap_df.iloc[:, SAP_COL_ORDER_QUANTITY].values
+    output_df['Quantity'] = sap_df.iloc[:, SAP_COL_PENDING_QUANTITY].values
     output_df['Unit'] = sap_df.iloc[:, SAP_COL_SALES_UNIT].values
 
     # (BH) SPS STD Sales Unit Price
@@ -527,9 +543,13 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     # ===== 4. Write to Excel =====
     output_df.to_excel(output_path, index=False, sheet_name='Opening SO')
 
+    wb = load_workbook(output_path)
+    ws = wb['Opening SO']
+
+    for col_letter, width in COLUMN_WIDTHS.items():
+        ws.column_dimensions[col_letter].width = width
+
     if inserted_row_indices or promotion_row_indices:
-        wb = load_workbook(output_path)
-        ws = wb['Opening SO']
         green_fill = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
         pink_fill = PatternFill(start_color='FCE4EC', end_color='FCE4EC', fill_type='solid')
         num_cols = len(OUTPUT_COLUMNS)
@@ -539,7 +559,8 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
         for row_idx in promotion_row_indices:
             for col in range(1, num_cols + 1):
                 ws.cell(row=row_idx + 2, column=col).fill = pink_fill
-        wb.save(output_path)
+
+    wb.save(output_path)
 
     return {
         "status": "success",

@@ -46,12 +46,23 @@
     .stat{background:#f8fafc;border-radius:8px;padding:12px 16px;flex:1;min-width:120px;text-align:center}
     .stat .num{font-size:1.25rem;font-weight:700;color:#3b82f6}
     .stat .label{font-size:.7rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;margin-top:2px}
+    .validation-box{border-radius:10px;padding:16px 20px;margin-top:12px;font-size:.85rem;line-height:1.6}
+    .validation-box.valid{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534}
+    .validation-box.invalid{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+    .validation-box .val-title{font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+    .validation-box ul{margin:4px 0 0 18px;padding:0}
+    .validation-box li{margin-bottom:2px}
+    .discount-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:.8rem}
+    .discount-table th,.discount-table td{text-align:left;padding:6px 10px;border-bottom:1px solid #e2e8f0}
+    .discount-table th{background:#f8fafc;color:#64748b;font-weight:600;text-transform:uppercase;font-size:.7rem;letter-spacing:.04em}
+    .discount-table td{color:#1e293b}
+    .spinner-dark{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,0,0,.15);border-top-color:#3b82f6;border-radius:50%;animation:spin .6s linear infinite}
   </style>
 </head>
 <body>
   <div class="card">
     <h1>SAP SO → NetSuite</h1>
-    <p class="subtitle">Convert SAP Sales Orders to NetSuite Opening SO format</p>
+    <p class="subtitle">version: 2.0 update: 4/3/2026</p>
 
     <!-- Step 1: Upload -->
     <div class="section">
@@ -61,6 +72,12 @@
         <p>Drag & drop your <strong>.xlsx</strong> file here, or click to browse</p>
         <input type="file" id="fileInput" accept=".xlsx,.xls">
       </div>
+    </div>
+
+    <!-- Validation Result -->
+    <div id="validationArea" class="section hidden">
+      <div class="section-title">Column Validation</div>
+      <div id="validationContent"></div>
     </div>
 
     <!-- Step 2: Import Master (optional) -->
@@ -108,6 +125,8 @@
     const generateBtn = document.getElementById('generateBtn');
     const resultArea = document.getElementById('resultArea');
     const downloadBtn = document.getElementById('downloadBtn');
+    const validationArea = document.getElementById('validationArea');
+    const validationContent = document.getElementById('validationContent');
     const toast = document.getElementById('toast');
 
     let uploadedFileId = null;
@@ -119,6 +138,72 @@
       toast.className = 'toast ' + type + ' show';
       clearTimeout(toast._timer);
       toast._timer = setTimeout(() => toast.classList.remove('show'), duration);
+    }
+
+    function enableActions(enabled) {
+      masterSelect.disabled = !enabled;
+      importBtn.disabled = !enabled;
+      generateBtn.disabled = !enabled;
+    }
+
+    function renderValidation(data) {
+      validationArea.classList.remove('hidden');
+      let html = '';
+
+      if (data.columns_valid) {
+        html += '<div class="validation-box valid"><div class="val-title">&#10004; All columns (A–AO) are valid</div></div>';
+      } else {
+        html += '<div class="validation-box invalid"><div class="val-title">&#10008; Column validation failed</div>';
+        if (data.message) {
+          html += '<p style="margin:4px 0 8px">' + data.message + '</p>';
+        }
+        const errors = data.column_errors || [];
+        if (errors.length > 0) {
+          html += '<ul>';
+          errors.forEach(e => {
+            const reason = e.reason ? ' — ' + e.reason : '';
+            html += '<li><strong>Column ' + e.index + ':</strong> expected "' + e.expected + '", got "' + (e.actual || '(empty)') + '"' + reason + '</li>';
+          });
+          html += '</ul>';
+        }
+        html += '</div>';
+      }
+
+      if (data.discounts && data.discounts.length > 0) {
+        html += '<div class="validation-box valid" style="margin-top:10px"><div class="val-title">Detected Discounts (' + data.discounts.length + ')</div>';
+        html += '<table class="discount-table"><thead><tr><th>SAP Discount</th><th>Type</th><th>Column Index</th></tr></thead><tbody>';
+        data.discounts.forEach(d => {
+          html += '<tr><td>' + d.sap_discount + '</td><td>' + d.discount_type + '</td><td>' + d.column_index + '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+
+      validationContent.innerHTML = html;
+    }
+
+    async function runValidation() {
+      validationArea.classList.remove('hidden');
+      validationContent.innerHTML = '<span class="spinner-dark"></span> Validating column headers…';
+      enableActions(false);
+      try {
+        const fd = new FormData();
+        fd.append('file_id', uploadedFileId);
+        fd.append('ext', uploadedExt);
+        const res = await fetch('/api/validate', { method: 'POST', body: fd });
+        const data = await res.json();
+        renderValidation(data);
+        if (data.columns_valid) {
+          enableActions(true);
+          showToast('Validation passed', 'success');
+        } else {
+          enableActions(false);
+          showToast('Validation failed — please check column errors', 'error', 6000);
+        }
+      } catch (e) {
+        validationContent.innerHTML = '<div class="validation-box invalid"><div class="val-title">&#10008; Validation error</div><p>' + e.message + '</p></div>';
+        enableActions(false);
+        showToast('Validation failed: ' + e.message, 'error');
+      }
     }
 
     // Upload
@@ -144,10 +229,8 @@
         uploadedExt = data.ext;
         dropZone.classList.add('uploaded');
         dropZone.innerHTML = '<span class="icon">✅</span><p>File uploaded</p><div class="filename">' + data.filename + '</div>';
-        masterSelect.disabled = false;
-        importBtn.disabled = false;
-        generateBtn.disabled = false;
-        showToast('File uploaded successfully', 'success');
+        showToast('File uploaded — validating headers…', 'info');
+        runValidation();
       } catch (e) {
         dropZone.innerHTML = '<span class="icon">📄</span><p>Drag & drop your <strong>.xlsx</strong> file here, or click to browse</p><input type="file" id="fileInput" accept=".xlsx,.xls">';
         showToast('Upload failed: ' + e.message, 'error');

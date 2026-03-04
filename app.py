@@ -13,6 +13,7 @@ load_dotenv()
 
 from services.import_master import import_master_data, MASTER_CONFIGS
 from services.generate_excel import generate_opening_so
+from services.validate_headers import validate_sap_headers
 
 app = FastAPI(title="SAP SO to NetSuite Converter")
 templates = Jinja2Templates(directory="templates")
@@ -52,6 +53,22 @@ async def upload_file(file: UploadFile = File(...)):
     content = await file.read()
     dest.write_bytes(content)
     return {"file_id": file_id, "filename": file.filename, "ext": ext}
+
+
+@app.post("/api/validate")
+async def validate_headers(
+    file_id: str = Form(...),
+    ext: str = Form(".xlsx"),
+):
+    """Validate SAP report column headers and detect discount columns."""
+    source = TEMP_DIR / f"{file_id}{ext}"
+    if not source.exists():
+        return JSONResponse({"status": "error", "message": "Uploaded file not found. Please upload again."}, status_code=404)
+    try:
+        result = validate_sap_headers(str(source))
+    except Exception as e:
+        result = {"status": "error", "message": str(e), "columns_valid": False, "column_errors": [], "discounts": []}
+    return result
 
 
 @app.post("/api/import-master")

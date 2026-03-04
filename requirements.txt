@@ -10,3 +10,4 @@ cryptography
 rapidfuzz
 python-dotenv
 numpy
+openai
