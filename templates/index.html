@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SAP SO → NetSuite Converter</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  {% if recaptcha_site_key %}
+  <script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_site_key }}"></script>
+  {% endif %}
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:'Inter',system-ui,sans-serif;background:#f1f5f9;color:#1e293b;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px}
@@ -129,6 +132,7 @@
     const validationContent = document.getElementById('validationContent');
     const toast = document.getElementById('toast');
 
+    const RECAPTCHA_SITE_KEY = '{{ recaptcha_site_key }}';
     let uploadedFileId = null;
     let uploadedExt = '.xlsx';
     let outputId = null;
@@ -217,14 +221,24 @@
     });
     fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
 
+    async function getRecaptchaToken() {
+      if (!RECAPTCHA_SITE_KEY || typeof grecaptcha === 'undefined') return '';
+      return await grecaptcha.execute(RECAPTCHA_SITE_KEY, { action: 'upload' });
+    }
+
     async function handleFile(file) {
       if (!file.name.match(/\.xlsx?$/i)) { showToast('Please upload an .xlsx file', 'error'); return; }
-      const fd = new FormData();
-      fd.append('file', file);
-      dropZone.innerHTML = '<span class="icon">⏳</span><p>Uploading…</p>';
+      dropZone.innerHTML = '<span class="icon">⏳</span><p>Verifying & uploading…</p>';
       try {
+        const token = await getRecaptchaToken();
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('recaptcha_token', token);
         const res = await fetch('/api/upload', { method: 'POST', body: fd });
         const data = await res.json();
+        if (res.status === 403) {
+          throw new Error(data.message || 'reCAPTCHA verification failed');
+        }
         uploadedFileId = data.file_id;
         uploadedExt = data.ext;
         dropZone.classList.add('uploaded');
@@ -233,6 +247,7 @@
         runValidation();
       } catch (e) {
         dropZone.innerHTML = '<span class="icon">📄</span><p>Drag & drop your <strong>.xlsx</strong> file here, or click to browse</p><input type="file" id="fileInput" accept=".xlsx,.xls">';
+        document.getElementById('fileInput').addEventListener('change', function() { if (this.files.length) handleFile(this.files[0]); });
         showToast('Upload failed: ' + e.message, 'error');
       }
     }

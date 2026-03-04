@@ -11,3 +11,4 @@ rapidfuzz
 python-dotenv
 numpy
 openai
+httpx

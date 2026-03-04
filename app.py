@@ -4,12 +4,18 @@ import glob
 import time
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 
 load_dotenv()
+
+RECAPTCHA_SITE_KEY = os.getenv("RECAPTCHA_SITE_KEY", "")
+RECAPTCHA_SECRET_KEY = os.getenv("RECAPTCHA_SECRET_KEY", "")
+RECAPTCHA_THRESHOLD = 0.5
+RECAPTCHA_VERIFY_URL = "https://www.google.com/recaptcha/api/siteverify"
 
 from services.import_master import import_master_data, MASTER_CONFIGS
 from services.generate_excel import generate_opening_so
@@ -34,18 +40,40 @@ def _cleanup_temp():
             f.unlink(missing_ok=True)
 
 
+async def _verify_recaptcha(token: str) -> tuple[bool, float]:
+    """Verify reCAPTCHA v3 token with Google. Returns (passed, score)."""
+    if not RECAPTCHA_SECRET_KEY:
+        return True, 1.0
+    async with httpx.AsyncClient(timeout=5) as client:
+        resp = await client.post(RECAPTCHA_VERIFY_URL, data={
+            "secret": RECAPTCHA_SECRET_KEY,
+            "response": token,
+        })
+        result = resp.json()
+    success = result.get("success", False)
+    score = result.get("score", 0.0)
+    return success and score >= RECAPTCHA_THRESHOLD, score
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     master_options = {k: cfg["sheet"] for k, cfg in MASTER_CONFIGS.items()}
     return templates.TemplateResponse("index.html", {
         "request": request,
         "master_options": master_options,
+        "recaptcha_site_key": RECAPTCHA_SITE_KEY,
     })
 
 
 @app.post("/api/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), recaptcha_token: str = Form("")):
     """Upload Excel file and return a temp file ID."""
+    passed, score = await _verify_recaptcha(recaptcha_token)
+    if not passed:
+        return JSONResponse(
+            {"status": "error", "message": f"reCAPTCHA verification failed (score={score:.2f}). Please try again."},
+            status_code=403,
+        )
     _cleanup_temp()
     file_id = str(uuid.uuid4())
     ext = Path(file.filename).suffix or ".xlsx"
