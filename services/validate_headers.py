@@ -52,7 +52,7 @@ EXPECTED_COLUMNS = [
 
 DISCOUNT_COLUMN_WIDTH = 8
 DISCOUNT_START_INDEX = 41
-DISCOUNT_PATTERN = re.compile(r"^(.+?)\s*\(by\s+(item|order)\)$", re.IGNORECASE)
+DISCOUNT_PATTERN = re.compile(r"^(.+?)\s*\(by\s+(item|order)\)", re.IGNORECASE)
 
 
 def _call_openai_validate(expected: list[str], actual: list[str]) -> dict:
