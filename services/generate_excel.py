@@ -498,8 +498,10 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     output_df['SPS STD Sales Total'] = output_df['Quantity'] * output_df['SPS STD Sales Unit Price']
 
     # (BJ), (CA-CQ) Dynamic by-item discount mapping from discount_master
+    # Phase 1: parse all item discounts from SAP columns
+    item_discount_parsed = []
     item_discount_amount_sum = pd.Series(0.0, index=sap_df.index)
-    for i, discount in enumerate(item_discounts, start=1):
+    for discount in item_discounts:
         sap_code = discount['sap_discount']
         base_idx = _require_sap_col(int(discount['column_index']), f"{sap_code} base")
         amount_idx = _require_sap_col(base_idx + 2, f"{sap_code} amount")
@@ -507,16 +509,24 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
 
         sap_code_col = sap_df.iloc[:, base_idx].astype(str).str.strip().str.upper()
         has_discount = sap_code_col.str.contains(sap_code, na=False)
-
-        code_col = f'Code of Discount/Markup {i}'
-        net_col = f'SPS Net Discount/Markup {i}'
-
-        output_df.loc[has_discount, code_col] = sap_code
         net_values = sap_df.iloc[:, value_idx].apply(parse_sap_number)
-        output_df.loc[has_discount, net_col] = net_values[has_discount]
-
         amount_values = sap_df.iloc[:, amount_idx].apply(parse_sap_number).fillna(0)
         item_discount_amount_sum = item_discount_amount_sum + amount_values.where(has_discount, 0)
+
+        item_discount_parsed.append({
+            'sap_code': sap_code,
+            'has': has_discount,
+            'net': net_values,
+        })
+
+    # Phase 2: per-row compact into slots 1..6
+    for row_idx in range(len(output_df)):
+        slot = 1
+        for d in item_discount_parsed:
+            if d['has'].iloc[row_idx]:
+                output_df.at[row_idx, f'Code of Discount/Markup {slot}'] = d['sap_code']
+                output_df.at[row_idx, f'SPS Net Discount/Markup {slot}'] = d['net'].iloc[row_idx]
+                slot += 1
 
     output_df['Unit Price after Item Discount (Exc.VAT)'] = (
         output_df['SPS STD Sales Unit Price'] + item_discount_amount_sum
@@ -539,16 +549,31 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     output_df['SPS Sales Discount Total'] = output_df[discount_cols].fillna(0).sum(axis=1)
 
     # (CT-CZ) Dynamic by-order discount mapping from discount_master
-    for i, discount in enumerate(order_discounts, start=1):
+    # Phase 1: parse all order discounts from SAP columns
+    order_discount_parsed = []
+    for discount in order_discounts:
         sap_code = discount['sap_discount']
         base_idx = _require_sap_col(int(discount['column_index']), f"{sap_code} base")
         value_idx = _require_sap_col(base_idx + 6, f"{sap_code} value")
 
         sap_code_col = sap_df.iloc[:, base_idx].astype(str).str.strip().str.upper()
         has_discount = sap_code_col.str.contains(sap_code, na=False)
-        promo_col = f'Promotion Order Amount {i}'
         promo_values = sap_df.iloc[:, value_idx].apply(parse_sap_number)
-        output_df.loc[has_discount, promo_col] = promo_values[has_discount]
+
+        order_discount_parsed.append({
+            'sap_code': sap_code,
+            'has': has_discount,
+            'value': promo_values,
+        })
+
+    # Phase 2: per-row compact into Promotion Order Code/Amount 1..3
+    for row_idx in range(len(output_df)):
+        slot = 1
+        for d in order_discount_parsed:
+            if d['has'].iloc[row_idx]:
+                output_df.at[row_idx, f'Promotion Order Code{slot}'] = d['sap_code']
+                output_df.at[row_idx, f'Promotion Order Amount {slot}'] = d['value'].iloc[row_idx]
+                slot += 1
 
     # (DA) Promotion Order Amount Total
     promo_cols = ['Promotion Order Amount 1', 'Promotion Order Amount 2', 'Promotion Order Amount 3']
