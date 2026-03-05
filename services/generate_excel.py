@@ -302,15 +302,6 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
         ['sap_discount', 'column_index', 'internal_id', 'discount_name']
     ].to_dict('records')
 
-    if len(item_discounts) > 6:
-        raise ValueError(
-            f"Found {len(item_discounts)} item discounts in discount_master, but output supports only 6."
-        )
-    if len(order_discounts) > 3:
-        raise ValueError(
-            f"Found {len(order_discounts)} order discounts in discount_master, but output supports only 3."
-        )
-
     sap_col_count = sap_df.shape[1]
 
     def _require_sap_col(idx: int, label: str) -> int:
@@ -519,10 +510,12 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
             'net': net_values,
         })
 
-    # Phase 2: per-row compact into slots 1..6
+    # Phase 2: per-row compact into slots 1..6 (max 6)
     for row_idx in range(len(output_df)):
         slot = 1
         for d in item_discount_parsed:
+            if slot > 6:
+                break
             if d['has'].iloc[row_idx]:
                 output_df.at[row_idx, f'Code of Discount/Markup {slot}'] = d['sap_code']
                 output_df.at[row_idx, f'SPS Net Discount/Markup {slot}'] = d['net'].iloc[row_idx]
@@ -566,10 +559,12 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
             'value': promo_values,
         })
 
-    # Phase 2: per-row compact into Promotion Order Code/Amount 1..3
+    # Phase 2: per-row compact into Promotion Order Code/Amount 1..3 (max 3)
     for row_idx in range(len(output_df)):
         slot = 1
         for d in order_discount_parsed:
+            if slot > 3:
+                break
             if d['has'].iloc[row_idx]:
                 output_df.at[row_idx, f'Promotion Order Code{slot}'] = d['sap_code']
                 output_df.at[row_idx, f'Promotion Order Amount {slot}'] = d['value'].iloc[row_idx]
