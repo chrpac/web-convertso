@@ -496,12 +496,11 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
         sap_code = discount['sap_discount']
         base_idx = _require_sap_col(int(discount['column_index']), f"{sap_code} base")
         amount_idx = _require_sap_col(base_idx + 2, f"{sap_code} amount")
-        value_idx = _require_sap_col(base_idx + 6, f"{sap_code} value")
 
         sap_code_col = sap_df.iloc[:, base_idx].astype(str).str.strip().str.upper()
         has_discount = sap_code_col.str.contains(sap_code, na=False)
-        net_values = sap_df.iloc[:, value_idx].apply(parse_sap_number)
         amount_values = sap_df.iloc[:, amount_idx].apply(parse_sap_number).fillna(0)
+        net_values = amount_values * output_df['Quantity']
         item_discount_amount_sum = item_discount_amount_sum + amount_values.where(has_discount, 0)
 
         item_discount_parsed.append({
@@ -547,11 +546,17 @@ def generate_opening_so(excel_path: str, output_path: str) -> dict:
     for discount in order_discounts:
         sap_code = discount['sap_discount']
         base_idx = _require_sap_col(int(discount['column_index']), f"{sap_code} base")
-        value_idx = _require_sap_col(base_idx + 6, f"{sap_code} value")
+        amount_idx = _require_sap_col(base_idx + 2, f"{sap_code} amount")
+
+        unit_idx = _require_sap_col(base_idx + 3, f"{sap_code} unit")
 
         sap_code_col = sap_df.iloc[:, base_idx].astype(str).str.strip().str.upper()
         has_discount = sap_code_col.str.contains(sap_code, na=False)
-        promo_values = sap_df.iloc[:, value_idx].apply(parse_sap_number)
+        sap_amount = sap_df.iloc[:, amount_idx].apply(parse_sap_number).fillna(0)
+        sap_unit = sap_df.iloc[:, unit_idx].astype(str).str.strip()
+        is_pct = sap_unit == '%'
+        sap_amount = sap_amount.where(~is_pct, sap_amount * 0.01)
+        promo_values = output_df['Amount'] * sap_amount
 
         order_discount_parsed.append({
             'sap_code': sap_code,
